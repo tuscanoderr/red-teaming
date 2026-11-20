@@ -1,0 +1,28 @@
+# OpenVPN configs & credentials — never commit these
+*.ovpn
+*.key
+*.pem
+credentials.txt
+creds.txt
+
+# THM / personal identifiers you may not want public
+**/private/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+.vscode/
+.idea/
+
+# Large captures
+*.pcap
+*.cap
+
+# Python / tooling
+__pycache__/
+*.pyc
+venv/
+.env

