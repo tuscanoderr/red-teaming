@@ -69,6 +69,8 @@ curl -s http://$IP/README.txt | head
 
 _Manual browse of `http://$IP/`: confirmed the "Daily Bugle" Joomla site. Front-page article "Spider-Man robs bank!" is **"Written by Super User"** — the Joomla super-admin's display name. A front-end Login Form is present, in addition to the `/administrator/` panel. Target account for later: the Super User (real username TBD via DB extraction)._
 
+![Daily Bugle homepage](assets/01-dailybugle-homepage.png)
+
 _Result (version):_ _(pending curl output)_
 
 ---
@@ -153,7 +155,13 @@ Credentials `jonah:spiderman123` grant Super User access to `/administrator`. Jo
 3. Edit a PHP file (e.g. `error.php` or `index.php`) and insert a PHP reverse shell.
 4. Start a listener, then request the edited file to trigger the shell.
 
+Planting the reverse shell in the Protostar template `index.php` via the admin editor:
+
+![Reverse shell planted in template](assets/03-reverse-shell-planted.png)
+
 _Result: reverse shell caught on the AttackBox listener (`nc -lvnp 4444`) after `curl http://$IP/templates/protostar/index.php`. Landed as the `apache` service account — initial foothold achieved._
+
+![Shell caught — foothold as apache](assets/04-shell-caught-apache-foothold.png)
 
 ## Phase 3 — Foothold
 
