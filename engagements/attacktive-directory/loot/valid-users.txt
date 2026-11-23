@@ -1,0 +1,11 @@
+Valid domain users — enumerated via kerbrute (Kerberos pre-auth response diff)
+Domain: spookysec.local  ·  DC: 10.129.173.201  ·  Date: 2026-11-23
+
+james
+svc-admin      <- service account (AS-REP roast target)
+robin
+darkstar
+administrator
+backup         <- likely replication rights (DCSync target later)
+paradox
+ori

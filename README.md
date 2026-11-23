@@ -19,7 +19,7 @@ Every engagement follows the phased approach documented in **[METHODOLOGY.md](./
 | # | Target | Platform | Difficulty | Key techniques | Status |
 |---|--------|----------|------------|----------------|--------|
 | 01 | [Daily Bugle](./engagements/daily-bugle/) | Linux (CentOS 7) | Hard | Joomla SQLi (CVE-2017-8917), hash cracking, template RCE, password reuse, `sudo yum` privesc | ✅ Rooted |
-| 02 | _TBD_ | _TBD_ | _TBD_ | _TBD_ | 🔜 Planned |
+| 02 | [Attacktive Directory](./engagements/attacktive-directory/) | Windows Server 2019 (AD DC) | Medium | AS-REP Roasting, Kerberos user enum, SMB loot, DCSync, Pass-the-Hash | ✅ Domain Admin |
 | 03 | _TBD_ | _TBD_ | _TBD_ | _TBD_ | 🔜 Planned |
 
 Each engagement lives in `engagements/<name>/` and contains:

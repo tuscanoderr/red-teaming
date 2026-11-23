@@ -1,0 +1,7 @@
+Flags — Attacktive Directory (spookysec.local / THM-AD)  ·  2026-11-23
+
+user    (svc-admin\Desktop\user.txt.txt) : TryHackMe{K3rb3r0s_Pr3_4uth}
+privesc (backup\Desktop\PrivEsc.txt)     : TryHackMe{B4ckM3UpSc0tty!}
+root    (Administrator\Desktop\root.txt) : TryHackMe{4ctiveD1rectoryM4st3r}
+
+Final access: thm-ad\administrator (Domain Admin) via Pass-the-Hash over WinRM.
