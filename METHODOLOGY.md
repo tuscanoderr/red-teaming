@@ -1,124 +1,91 @@
 # Assessment Methodology
 
-The repeatable process applied to every engagement in this repository. It is aligned to the **Penetration Testing Execution Standard (PTES)** and, for web application targets, the **OWASP Web Security Testing Guide (WSTG)**. The intent is that any reader can follow the same phases and arrive at the same result — the hallmark of a disciplined assessment versus ad-hoc hacking.
+Every engagement in this repository follows the same six-phase process, aligned to the **Penetration Testing Execution Standard (PTES)** and, for web targets, the **OWASP Web Security Testing Guide**. The phases are deliberately explicit so any reader can follow the same path and reach the same result — the hallmark of a disciplined assessment versus ad-hoc hacking.
+
+> **Authorization.** All testing is performed only against machines explicitly authorized within the TryHackMe platform, over its isolated VPN. Nothing outside the single assigned target is touched.
+
+The six phases, applied to every engagement:
+
+| # | Phase | Question it answers |
+|---|-------|---------------------|
+| 1 | **Reconnaissance** | What is the target and what is exposed? |
+| 2 | **Enumeration** | What exactly is each exposed service, and what detail can we extract? |
+| 3 | **Vulnerability Analysis** | Which of those details is a *weakness*, and how severe? |
+| 4 | **Exploitation** | Can we prove the weakness by gaining access? |
+| 5 | **Post-Exploitation** | How far does that access reach — escalation, lateral movement, impact? |
+| 6 | **Reporting (risk translation)** | What does this mean for the business, and how is it fixed? |
 
 ---
 
-## Phase 0 — Engagement setup & scope
+## Phase 1 — Reconnaissance
 
-Before any packet is sent:
-
-- **Authorization confirmed.** Target is in-scope (a TryHackMe room assigned to my account). Nothing outside the single target IP is touched.
-- **Rules of engagement.** Single host, isolated VPN, no destructive actions beyond what proves the finding.
-- **Working directory prepared.** One folder per engagement; evidence captured as I go, not reconstructed afterward.
+Establish what the target is and what it exposes. Breadth first, no assumptions.
 
 ```bash
-# Connect to the isolated lab network, then confirm reachability
-ping -c 3 <TARGET_IP>
-export IP=<TARGET_IP>        # referenced throughout as $IP
+ping -c 3 $IP                                             # alive? (TTL hints at OS)
+nmap -p- --min-rate 10000 -T4 $IP -oN scans/allports.txt # every open port
 ```
 
----
+Output: a confirmed list of open ports and a first hypothesis of the host's role (web server, domain controller, etc.).
 
-## Phase 1 — Reconnaissance & enumeration
+## Phase 2 — Enumeration
 
-> *"Enumeration is the heartbeat of a pentest." The majority of engagement time lives here. A missed service is a missed finding.*
-
-### 1.1 Host discovery & port scan
+Turn open ports into detailed, actionable facts. This is where the majority of engagement time lives — a missed detail is a missed finding.
 
 ```bash
-# Fast full-port sweep to find everything listening
-nmap -p- --min-rate 10000 -T4 $IP -oN scans/01-allports.txt
-
-# Deep scan (service versions + default scripts) on the discovered ports
-nmap -p <PORTS> -sC -sV -oN scans/02-services.txt $IP
+nmap -p <ports> -sC -sV -oN scans/services.txt $IP       # versions + default scripts
 ```
 
-Record, for every open port: service, version, and the first hypothesis about how it could be abused.
-
-### 1.2 Service-specific enumeration
-
-Drill into each service with the right tool:
+Then drill into each service with the right tool:
 
 | Service | Tooling / technique |
 |---------|---------------------|
-| HTTP/HTTPS | `whatweb`, `gobuster`/`feroxbuster` dir & vhost brute, `nikto`, manual source review, tech fingerprint (CMS → version → known CVEs) |
-| SMB (139/445) | `enum4linux-ng`, `smbclient -L`, `smbmap`, null-session checks |
-| FTP (21) | anonymous login, `ftp` banner, writable dirs |
-| SSH (22) | version → known CVEs, auth methods, user enumeration |
-| DNS (53) | zone transfer `dig axfr`, subdomain brute |
-| LDAP/Kerberos (389/88) | AD enumeration — users, SPNs, AS-REP-roastable accounts |
-| RPC/NFS | `rpcclient`, `showmount -e` |
+| HTTP/HTTPS | `whatweb`, `gobuster`/`feroxbuster`, CMS + **version** fingerprint, manual review |
+| SMB (139/445) | `enum4linux(-ng)`, `crackmapexec`/`nxc`, `smbclient`, null-session checks |
+| Kerberos/LDAP (88/389) | domain name, user enumeration (`kerbrute`), AS-REP-roastable accounts |
+| FTP/SSH/DNS | banners, anonymous access, zone transfers, known-CVE mapping |
 
-### 1.3 Attack-surface synthesis
+Output: the exact software, versions, accounts, shares, and configuration that make up the attack surface.
 
-Consolidate findings into a short list of *credible* attack paths ranked by likelihood and impact. This is the decision point that separates a methodical tester from a tool-runner.
+## Phase 3 — Vulnerability Analysis
 
----
+Decide which enumerated facts are **weaknesses**, confirm them, and rank them.
 
-## Phase 2 — Vulnerability analysis
+- Map versions/configs to known vulnerabilities (CVE, exploit-db, vendor advisories).
+- **Validate before trusting** — scanner output is a lead, not a finding.
+- Assign a provisional severity with **CVSS v3.1** so prioritization is defensible.
 
-- Map versions/configurations to known vulnerabilities (CVE, exploit-db, vendor advisories).
-- **Validate before trusting.** Scanner output is a lead, not a finding. Confirm the vulnerable code path actually exists on this target.
-- Assign a provisional severity using **CVSS v3.1** so prioritization is defensible.
+Output: a short, ranked list of credible attack paths — the decision point that separates a methodical tester from a tool-runner.
 
----
+## Phase 4 — Exploitation
 
-## Phase 3 — Exploitation (gaining a foothold)
+Prove the weakness by gaining access. Lowest-noise, highest-reliability path first; understand *why* it works, and capture evidence at the moment of compromise (command + output + timestamp).
 
-- Choose the lowest-noise, highest-reliability path first.
-- Prefer understanding the exploit over blindly firing it — document *why* it works.
-- Capture evidence at the moment of compromise (command + output + timestamp).
+Output: the **initial access vector** — the primary finding — and a foothold.
 
-```bash
-# Example: catch a reverse shell
-nc -lvnp 4444
-# Stabilize the shell
-python3 -c 'import pty; pty.spawn("/bin/bash")'   # then Ctrl-Z, stty raw -echo, fg
-```
+## Phase 5 — Post-Exploitation
 
-Record the **initial access vector** clearly — this is the primary finding.
-
----
-
-## Phase 4 — Post-exploitation & privilege escalation
-
-### 4.1 Situational awareness
+Measure how far the foothold reaches. This is where impact is demonstrated.
 
 ```bash
-id; whoami; hostname; uname -a          # who am I, where am I
-sudo -l                                 # delegated rights
-# Automated triage
-./linpeas.sh    |  tee loot/linpeas.txt   # Linux
-# winPEAS.exe   >  loot/winpeas.txt        # Windows
+id; whoami; hostname; sudo -l            # situational awareness
+./linpeas.sh | tee loot/linpeas.txt      # automated triage (winPEAS on Windows)
 ```
 
-### 4.2 Escalation
+Covers: privilege escalation, credential looting, lateral movement, and capture of objectives (flags / proof). Clean up afterward (remove uploaded tooling/shells; note anything intentionally left).
 
-Common vectors to check deliberately: misconfigured `sudo`, SUID/SGID binaries (GTFOBins), writable cron/service paths, kernel exploits (last resort), stored credentials, overly-permissioned tokens/groups.
+Output: the full extent of compromise, with proof.
 
-### 4.3 Lateral movement (multi-host engagements)
+## Phase 6 — Reporting (risk translation)
 
-Pivoting, credential reuse, and tunneling where the engagement has more than one host.
+Convert the technical chain into business risk and remediation. Each engagement produces two documents:
 
----
+1. **`report.md`** — the formal deliverable a client reads: executive summary, a finding register (each finding with **severity, evidence, impact, and remediation**), the attack narrative, and a prioritized remediation roadmap.
+2. **`walkthrough.md`** — the technical narrative a peer reviews: every command and the reasoning behind it, organized by these six phases.
 
-## Phase 5 — Evidence & proof of compromise
+**Translating to risk** means every finding answers: *what is the business impact* (confidentiality/integrity/availability), *how likely/easy is exploitation*, and *what is the concrete fix*. A finding without a remediation is incomplete.
 
-- Capture flags/objectives with the proof command visible (`cat flag`, `whoami`).
-- Timestamped screenshots stored under the engagement's `assets/`.
-- Extracted artifacts (hashes, config snippets) under `loot/` — sanitized where appropriate.
-
----
-
-## Phase 6 — Reporting
-
-Produce two documents per engagement:
-
-1. **`report.md`** — the formal deliverable: executive summary, finding register (each with severity, evidence, impact, remediation), and an overall risk picture. This is what a client reads.
-2. **`walkthrough.md`** — the technical narrative: every command, the reasoning behind it, and dead-ends explored. This is what a peer reviews.
-
-### Finding severity scale
+### Severity scale
 
 | Severity | CVSS band | Meaning |
 |----------|-----------|---------|
@@ -127,14 +94,3 @@ Produce two documents per engagement:
 | Medium | 4.0–6.9 | Meaningful risk, conditions apply |
 | Low | 0.1–3.9 | Limited impact / defense-in-depth |
 | Info | — | Hygiene, no direct exploit |
-
-### Remediation framing
-
-Every finding closes with: **root cause → recommended fix → references**. A finding without a remediation is an incomplete finding.
-
----
-
-## Phase 7 — Cleanup
-
-- Remove uploaded tooling / shells from the target.
-- Note any artifacts intentionally left (and why) for the report's appendix.

